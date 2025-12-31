@@ -1,4 +1,4 @@
-package socket.io
+package socketio
 
 import "go.k6.io/k6/js/modules"
 
