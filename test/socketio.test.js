@@ -13,15 +13,12 @@ export default function () {
   io("http://localhost:4000", {}, (socket) => {
     let connected = false;
 
-    socket.on("message", (m) => {
-      console.log("RAW:", m);
+    socket.on("hello_back", (msg) => {
+      console.log('getting from helloback ', msg.got)
+    })
+    socket.emit("hello", { test: "test" })
+    // socket.setTimeout(() => socket.emit("hello", { test: "test" }), 2000);
 
-      if ((m === "40" || m.startsWith("40"))) {
-        connected = true;
-        console.log("SIO connected, emitting...");
-        socket.emit("hello", { from: "k6", t: Date.now() });
-      }
-    });
   });
 
   sleep(5);

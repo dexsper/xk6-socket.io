@@ -4,6 +4,7 @@ const io = new Server(4000, { cors: { origin: "*" } });
 
 io.on("connection", (socket) => {
   console.log("connected:", socket.id);
+  // socket.emit("hello_back", { ok: true, got: "ciao" });
 
   socket.on("message", (data) => {
     console.log("message:", data);

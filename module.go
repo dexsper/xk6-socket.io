@@ -97,7 +97,8 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 	callback := runtime.ToValue(func(callbackContext sobek.FunctionCall) sobek.Value {
 		connected := false
-	
+		var pendingEmits []func()
+
 		socketValue := callbackContext.Argument(0)
 		socketObject := socketValue.ToObject(runtime)
 
@@ -108,18 +109,25 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		jsonStringifyFunction := requireMethod(runtime, jsonObject, "stringify")
 		
 		emitFunction := func(event string, data sobek.Value) {
-			array := runtime.NewArray()
-			_ = array.Set("0", runtime.ToValue(event))
-			_ = array.Set("1", data)
+			send := func() {
+        array := runtime.NewArray()
+        _ = array.Set("0", runtime.ToValue(event))
+        _ = array.Set("1", data)
 
-			stringifiedArray, err := jsonStringifyFunction(sobek.Undefined(), array)
-			if err != nil { panic(err) }
+        str, _ := jsonStringifyFunction(sobek.Undefined(), array)
+        packet := "42" + str.String()
 
-			packet := "42" + stringifiedArray.String()
-
-			if _, err := sendFunction(socketValue, runtime.ToValue(packet)); err != nil {
-				panic(err)
+				if _, err := sendFunction(socketValue, runtime.ToValue(packet)); err != nil {
+					panic(err)
+				}
 			}
+
+			if !connected {
+					pendingEmits = append(pendingEmits, send)
+					return
+			}
+
+			send()
 		}
 
 		wrapper := runtime.NewObject()
@@ -127,8 +135,6 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 		// inject emit method
 		wrapper.Set("emit", runtime.ToValue(func(emitContext sobek.FunctionCall) sobek.Value {
-			if !connected { panic(runtime.ToValue("connection not esablished")) }
-
 			if len(emitContext.Arguments) == 0 { panic(runtime.ToValue("emit(event, data): missing event")) }
 			event := emitContext.Argument(0).String()
 
@@ -147,6 +153,49 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			return sobek.Undefined()
 		}))
 
+		wrapper.Set("on", runtime.ToValue(func(eventHandlerContext sobek.FunctionCall) sobek.Value {
+			if len(eventHandlerContext.Arguments) == 0 { panic(runtime.ToValue("on(event, handler): missing event")) }
+
+			eventType := eventHandlerContext.Argument(0).String()
+			handlerValue := eventHandlerContext.Argument(1)
+			var handlerFunction sobek.Callable
+			if handlerValue != nil && !sobek.IsUndefined(handlerValue) && !sobek.IsNull(handlerValue) {
+				_handlerFunction, ok := sobek.AssertFunction(handlerValue)
+				if !ok { panic(runtime.ToValue("on(event, handler): handler must be a function")) }
+			
+				handlerFunction = _handlerFunction
+			}
+		
+			if _, err := onCallbackFunction(socketValue, runtime.ToValue("message"), runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
+				msg := msgHandlerContext.Argument(0).String()
+
+
+
+				if strings.HasPrefix(msg, "42") {
+					trimmed := strings.TrimPrefix(msg, "42")
+					event, data, _ := extractEvent(trimmed)
+
+					if (eventType == event) {
+						if _, err := handlerFunction(sobek.Undefined(), runtime.ToValue(data)); err != nil {
+							panic(err)
+							return sobek.Undefined()
+						} 
+					}
+				}
+
+				// if _, err := handlerFunction(sobek.Undefined(), runtime.ToValue(msg)); err != nil {
+				// 	panic(err)
+				// 	return sobek.Undefined()
+				// } 
+				return sobek.Undefined()
+			})); err != nil {
+				panic(err)
+				return sobek.Undefined()
+			}
+
+			return sobek.Undefined()
+		}))
+
 		msgHandler := runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
 			msg := msgHandlerContext.Argument(0).String()
 			fmt.Println("connection status: ", connected, "message:  ", msg)
@@ -161,9 +210,16 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			}
 
 			if strings.HasPrefix(msg, "40") {
-				fmt.Println("received 40, ", connected)
-
 				connected = true
+
+				fmt.Println("pendings", pendingEmits)
+
+				for _, fn := range pendingEmits {
+					fmt.Println("going through pending")
+					fn()
+				}
+				pendingEmits = nil
+
 				return sobek.Undefined()
 			}
 
@@ -211,9 +267,8 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			panic(err)
 		}
 
-		// run handler and exit
+		// run handler
 		if handlerFunction != nil {
-			// panic(runtime.ToValue("we have handler"))
 			if _, err := handlerFunction(sobek.Undefined(), wrapper); err != nil {
 				panic(err)
 			} 
@@ -272,4 +327,24 @@ func buildSocketIOWSURL(host string, opts Options) (string, error) {
 	_url.RawQuery = _query.Encode()
 
 	return _url.String(), nil
+}
+
+func extractEvent(msg string) (string, any, error) {
+	var arr []any
+
+	if err := json.Unmarshal([]byte(msg), &arr); err != nil {
+		return "", nil, err
+	}
+
+	event, ok := arr[0].(string); 
+	if !ok {
+		return "", nil, fmt.Errorf("event is not a string")
+	}
+
+	var data any
+	if len(arr) > 1 {
+		data = arr[1]
+	}
+
+	return event, data, nil
 }
