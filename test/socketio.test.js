@@ -13,14 +13,22 @@ export default function () {
   io("http://localhost:4000", {}, (socket) => {
     let connected = false;
 
+    socket.on("connect", (data) => {
+      console.log('yo')
+      console.log('data', data)
+    })
+
+    socket.on("disconnect", () => {
+      console.log('closed')
+    })
+
     socket.on("hello_back", (msg) => {
       console.log('getting from helloback ', msg.got)
     })
     socket.emit("hello", { test: "test" })
-    // socket.setTimeout(() => socket.emit("hello", { test: "test" }), 2000);
 
   });
 
-  sleep(5);
+  sleep(30);
 
 }

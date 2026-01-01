@@ -1,4 +1,3 @@
-// Package socket.io contains the xk6-socket.io extension.
 package socketio
 
 import (
@@ -59,6 +58,42 @@ type Options struct {
 	Params    map[string]any `json:"params"`
 }
 
+var EngineIOCodes = struct {
+	Open     string
+	Close    string
+	Ping     string
+	Pong     string
+	Message  string
+	Upgrade  string
+	Noop     string
+}{
+	Open:    "0",
+	Close:   "1",
+	Ping:    "2",
+	Pong:    "3",
+	Message: "4",
+	Upgrade: "5",
+	Noop:    "6",
+}
+
+var SocketIOCodes = struct {
+	Connect      string
+	Disconnect   string
+	Event        string
+	Ack          string
+	Error        string
+	BinaryEvent  string
+	BinaryAck    string
+}{
+	Connect:     "0",
+	Disconnect:  "1",
+	Event:       "2",
+	Ack:         "3",
+	Error:       "4",
+	BinaryEvent: "5",
+	BinaryAck:   "6",
+}
+
 func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (sobek.Value, error) {
 	runtime := m.vu.Runtime()
 
@@ -96,8 +131,9 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 	// connectFunction := requireMethod(runtime, wsModuleObj, "connect")
 
 	callback := runtime.ToValue(func(callbackContext sobek.FunctionCall) sobek.Value {
-		connected := false
+		var connected = false
 		var pendingEmits []func()
+		var callbackHandlers = map[string][]sobek.Callable{}
 
 		socketValue := callbackContext.Argument(0)
 		socketObject := socketValue.ToObject(runtime)
@@ -107,6 +143,14 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 		jsonObject := runtime.Get("JSON").ToObject(runtime)
 		jsonStringifyFunction := requireMethod(runtime, jsonObject, "stringify")
+
+		dispatch := func(event string, payload any) {
+			if list, ok := callbackHandlers[event]; ok {
+				for _, handler := range list {
+					_, _ = handler(sobek.Undefined(), runtime.ToValue(payload))
+				}
+			}
+		}
 		
 		emitFunction := func(event string, data sobek.Value) {
 			send := func() {
@@ -115,7 +159,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
         _ = array.Set("1", data)
 
         str, _ := jsonStringifyFunction(sobek.Undefined(), array)
-        packet := "42" + str.String()
+        packet := EngineIOCodes.Message + SocketIOCodes.Event + str.String()
 
 				if _, err := sendFunction(socketValue, runtime.ToValue(packet)); err != nil {
 					panic(err)
@@ -165,28 +209,32 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			
 				handlerFunction = _handlerFunction
 			}
+
+			if (eventType == "connect") {
+				callbackHandlers["connect"] = append(callbackHandlers["connect"], handlerFunction)
+				return sobek.Undefined()
+			}
+
+			if (eventType == "disconnect") {
+				callbackHandlers["disconnect"] = append(callbackHandlers["disconnect"], handlerFunction)
+				return sobek.Undefined()
+			}
 		
 			if _, err := onCallbackFunction(socketValue, runtime.ToValue("message"), runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
 				msg := msgHandlerContext.Argument(0).String()
 
 
-
-				if strings.HasPrefix(msg, "42") {
-					trimmed := strings.TrimPrefix(msg, "42")
+				if strings.HasPrefix(msg, EngineIOCodes.Message + SocketIOCodes.Event) {
+					trimmed := strings.TrimPrefix(msg, EngineIOCodes.Message + SocketIOCodes.Event)
 					event, data, _ := extractEvent(trimmed)
 
 					if (eventType == event) {
 						if _, err := handlerFunction(sobek.Undefined(), runtime.ToValue(data)); err != nil {
 							panic(err)
-							return sobek.Undefined()
 						} 
 					}
 				}
 
-				// if _, err := handlerFunction(sobek.Undefined(), runtime.ToValue(msg)); err != nil {
-				// 	panic(err)
-				// 	return sobek.Undefined()
-				// } 
 				return sobek.Undefined()
 			})); err != nil {
 				panic(err)
@@ -198,18 +246,17 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 		msgHandler := runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
 			msg := msgHandlerContext.Argument(0).String()
-			fmt.Println("connection status: ", connected, "message:  ", msg)
 
 			// Engine.IO ping -> pong
-			if msg == "2" {
-				if _, err := sendFunction(socketValue, runtime.ToValue("3")); err != nil {
+			if msg == EngineIOCodes.Ping {
+				if _, err := sendFunction(socketValue, runtime.ToValue(EngineIOCodes.Pong)); err != nil {
 					panic(err)
 				}
 
 				return sobek.Undefined()
 			}
 
-			if strings.HasPrefix(msg, "40") {
+			if strings.HasPrefix(msg, EngineIOCodes.Message + SocketIOCodes.Connect) {
 				connected = true
 
 				fmt.Println("pendings", pendingEmits)
@@ -220,18 +267,27 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				}
 				pendingEmits = nil
 
+				dispatch("connect", nil)
+
 				return sobek.Undefined()
 			}
 
-			if msg == "1" || msg == "41" {
+			if msg == EngineIOCodes.Close || msg == EngineIOCodes.Message + SocketIOCodes.Disconnect {
+				connected = false
 
+				dispatch("disconnect", nil)
+
+				callbackHandlers = map[string][]sobek.Callable{}
+				pendingEmits = nil
+
+				return sobek.Undefined()
 			}
 
-			if strings.HasPrefix(msg, "0") {
+			if strings.HasPrefix(msg, EngineIOCodes.Open) {
 				if connected { return sobek.Undefined() }
 				fmt.Println("going through, ", connected, msg)
 
-				packet := "40"
+				packet := EngineIOCodes.Message + SocketIOCodes.Connect
 
 				// handle namespace
 				namespace := options.Namespace
