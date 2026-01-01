@@ -92,8 +92,8 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		
 		emitFunction := func(event string, data sobek.Value) {
 			array := runtime.NewArray()
-			_ = array.Push(runtime.ToValue(event))
-			_ = array.Push(data)
+			_ = array.Set("0", runtime.ToValue(event))
+			_ = array.Set("1", data)
 
 			stringifiedArray, err := jsonStringifyFunction(sobek.Undefined(), array)
 			if err != nil { panic(err) }
@@ -110,7 +110,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			
 			// Engine.IO ping -> pong
 			if msg == "2" {
-				_, _ := sendFunction(socketObject, runtime.ToValue("3"))
+				_, _ = sendFunction(socketObject, runtime.ToValue("3"))
 				return sobek.Undefined()
 			}
 
@@ -139,9 +139,11 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 					}
 				}
 
-				_, _ := sendFunction(socketObject, runtime.ToValue(packet))
+				_, _ = sendFunction(socketObject, runtime.ToValue(packet))
 				return sobek.Undefined()
 			}
+
+			return sobek.Undefined()
 		}) 
 
 		if _, err := onCallbackFunction(socketObject, runtime.ToValue("message"), msgHandler); err != nil {

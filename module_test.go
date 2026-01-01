@@ -1,4 +1,4 @@
-package socket.io
+package socketio
 
 import (
 	_ "embed"
