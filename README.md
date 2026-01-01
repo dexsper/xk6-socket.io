@@ -1,74 +1,154 @@
 # xk6-socket.io
 
-**Example k6 extension**
+Socket.IO client for k6, implemented as an xk6 extension. Use it to drive Socket.IO WebSocket traffic from k6 scripts, including custom events, connect/disconnect hooks, and basic auth/query configuration.
 
-This k6 extension showcases how to develop a k6 JavaScript extension using simple functions. It serves as the basis for new JavaScript extensions created with the `xk6 new` command. Additionally, this repository functions as a GitHub template for creating k6 extension repositories.
+## Features
 
+- Socket.IO over Engine.IO v4 WebSocket transport
+- Simple `io()` API that mirrors common Socket.IO usage
+- Event handlers for `connect`, `disconnect`, and custom events
+- `emit()` and `send()` helpers
+- Pass-through options for `k6/ws.connect`
 
-```javascript file=script.js
-import { greeting } from "k6/x/socket.io";
+## Requirements
 
-export default function () {
-  console.log(greeting()) // Hello, World!
-  console.log(greeting("Joe")) // Hello, Joe!
-}
+- Go 1.24+
+- k6 and xk6
+
+## Install / Build
+
+Build a custom k6 binary with this extension:
+
+```shell
+xk6 build --with github.com/xemax32/xk6-socket.io@latest
+```
+
+If you are working locally in this repo:
+
+```shell
+xk6 build --with github.com/xemax32/xk6-socket.io=.
 ```
 
 ## Quick start
 
-1. **Create a GitHub repository**. This can be done interactively in a browser by clicking [here](https://github.com/new?template_name=xk6-socket.io&template_owner=grafana).
+Start a Socket.IO test server (a simple one is provided):
 
-    Alternatively, use the [GitHub CLI](https://cli.github.com/) to create the repository.
+```shell
+node test/sio-test/server.js
+```
 
-    ```shell
-   gh repo create -p grafana/xk6-socket.io -d "Experimental k6 extension" --public xk6-quickstart
-    ```
+Run a k6 script using the custom binary:
 
-2. **Create a codespace**. Go to the repository you created in the previous step. Click the green **Code** button and then select **Codespaces** from the dropdown menu. Click **Create new codespace**.
+```shell
+./k6 run script.js
+```
 
-    Alternatively, use the [GitHub CLI](https://cli.github.com/) to create the codespace, replacing `USER` with your GitHub username:
+Example script:
 
-    ```shell
-    gh codespace create --repo USER/xk6-quickstart --web
-    ```
+```javascript
+import { io } from "k6/x/socketio";
+import { sleep } from "k6";
 
-    Once the codespace is ready, it will open in your browser as a Visual Studio Code-like environment, letting you begin working on your project with the repository code already checked out.
+export default function () {
+  const options = {
+    path: "/socket.io/",
+    namespace: "/",
+    auth: { token: "demo-token" },
+    query: { env: "local", user: "vu-1" },
+    params: {
+      headers: { "x-client": "k6" },
+      tags: { scenario: "socketio" },
+    },
+  };
 
-3. Run the test script. The repository's root directory includes a `script.js` file. When developing k6 extensions, use the `xk6 run` command instead of `k6 run` to execute your scripts.
+  io("http://localhost:4000", options, (socket) => {
+    socket.on("connect", () => {
+      console.log("connected");
+      socket.emit("hello", { payload: "hi from k6" });
+      socket.send({ type: "data", ts: Date.now() });
+    });
 
-    ```shell
-    xk6 run script.js
-    ```
+    socket.on("message", (msg) => {
+      console.log("message", msg);
+    });
 
-## Development environment
+    socket.on("disconnect", () => {
+      console.log("disconnected");
+    });
+  });
+}
+```
 
-While using a GitHub codespace in the browser is a good starting point, you can also set up a local development environment for a better developer experience.
+## API
 
-To create a local development environment, you need an IDE that supports [Development Containers](https://containers.dev/). [Visual Studio Code](https://code.visualstudio.com/) supports Development Containers after installing the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers).
+### `io(host, options?, handler?)`
 
-1. First, clone the `xk6-quickstart` repository to your machine and open it in Visual Studio Code. Make sure to replace `USER` with your GitHub username:
+Connects to a Socket.IO server and returns the underlying `k6/ws.connect` result.
 
-   ```shell
-   git clone https://github.com/USER/xk6-quickstart.git
-   code xk6-quickstart
-   ```
+- `host` (string): Base URL such as `http://localhost:4000` or `wss://example.com`.
+- `options` (object, optional): Configuration described below.
+- `handler` (function, optional): Called with a Socket.IO-like `socket` wrapper.
 
-2. Visual Studio Code will detect the [development container](https://containers.dev/) configuration and show a pop-up to open the project in a dev container. Accept the prompt and the project opens in the dev container, and the container image is rebuilt if necessary.
+### Socket wrapper
 
-3. Run the test script. The repository's root directory includes a `script.js` file. When developing k6 extensions, use the `xk6 run` command instead of `k6 run` to execute your scripts.
+Inside the handler you can use:
 
-    ```shell
-    xk6 run script.js
-    ```
+- `socket.on(event, handler)`
+- `socket.emit(event, data)`
+- `socket.send(data)` (alias for `emit("message", data)`)
+- All other `k6/ws` socket methods are available as-is via the wrapper (it preserves the original WebSocket prototype).
 
-## Download
+Supported built-in events:
 
-Building a custom k6 binary with the `xk6-socket.io` extension is necessary for its use. You can download pre-built k6 binaries from the [Releases page](https://github.com/xemax32/xk6-socket.io/releases/).
+- `connect`
+- `disconnect`
 
-## Build
+Custom events are dispatched from `socket.on("your_event", handler)` when messages arrive.
 
-Use the [xk6](https://github.com/grafana/xk6) tool to build a custom k6 binary with the `xk6-socket.io` extension. Refer to the [xk6 documentation](https://github.com/grafana/xk6) for more information.
+## Options
 
-## Contribute
+All options are optional.
 
-If you wish to contribute to this project, please start by reading the [Contributing Guidelines](CONTRIBUTING.md).
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | string | `/socket.io/` | Socket.IO path. |
+| `namespace` | string | `/` | Namespace to connect to (e.g. `/chat`). |
+| `auth` | object | `null` | Auth payload sent in the connect packet. |
+| `query` | object | `{}` | Query parameters appended to the URL. |
+| `params` | object | `{}` | Passed directly to `k6/ws.connect` (e.g. headers, tags). |
+
+## Development
+
+Run Go tests:
+
+```shell
+go test ./...
+```
+
+Run the Socket.IO JS test (requires a running server):
+
+```shell
+node test/sio-test/server.js
+./k6 run test/socketio.test.js
+```
+
+## Compatibility and limitations
+
+- WebSocket transport only (no HTTP long-polling).
+- Engine.IO protocol v4.
+- No reconnection logic.
+- ACKs and binary payloads are not implemented.
+
+## TODO
+
+- Namespaces support (including dynamic namespace handling).
+- Connection state recovery / session ID handling.
+- Authentication middleware / auth payload support.
+- Client/server-side connect_error and error packet handling.
+- ACKs support.
+- Room support
+- Binary attachments framing.
+
+## License
+
+See `LICENSE`.

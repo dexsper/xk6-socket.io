@@ -290,6 +290,11 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				callbackHandlers = map[string][]sobek.Callable{}
 				pendingEmits = nil
 
+				closeFn := requireMethod(runtime, socketObject, "close")
+				_, err = closeFn(socketObject)
+
+				if err != nil { fmt.Println("error while closing ws") }
+
 				return sobek.Undefined()
 			}
 
@@ -317,7 +322,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 						packet = packet + string(bearer)
 					}
 				}
-				fmt.Println("here %s", packet)
+				fmt.Printf("here %s", packet)
 
 				if _, err := sendFunction(socketValue, runtime.ToValue(packet)); err != nil {
 					panic(err)
