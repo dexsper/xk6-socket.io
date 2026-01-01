@@ -147,7 +147,8 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		dispatch := func(event string, payload any) {
 			if list, ok := callbackHandlers[event]; ok {
 				for _, handler := range list {
-					_, _ = handler(sobek.Undefined(), runtime.ToValue(payload))
+					_, err = handler(sobek.Undefined(), runtime.ToValue(payload))
+					if err != nil { fmt.Println("event dispatch error") }
 				}
 			}
 		}
@@ -175,10 +176,11 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		}
 
 		wrapper := runtime.NewObject()
-    wrapper.SetPrototype(socketObject)
+    err = wrapper.SetPrototype(socketObject)
+		if err != nil { fmt.Println("error while setting up prototype") }
 
 		// inject emit method
-		wrapper.Set("emit", runtime.ToValue(func(emitContext sobek.FunctionCall) sobek.Value {
+		err = wrapper.Set("emit", runtime.ToValue(func(emitContext sobek.FunctionCall) sobek.Value {
 			if len(emitContext.Arguments) == 0 { panic(runtime.ToValue("emit(event, data): missing event")) }
 			event := emitContext.Argument(0).String()
 
@@ -189,15 +191,20 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			return sobek.Undefined()
 		}))
 
+		if err != nil { fmt.Println("error while adding emit to socket prototype") }
+
 		// inject send method
-		wrapper.Set("send", runtime.ToValue(func(sendContext sobek.FunctionCall) sobek.Value {
+		err = wrapper.Set("send", runtime.ToValue(func(sendContext sobek.FunctionCall) sobek.Value {
 			if len(sendContext.Arguments) == 0 { panic(runtime.ToValue("send(data): missing data")) }
 
 			emitFunction("message", sendContext.Argument(0))
 			return sobek.Undefined()
 		}))
 
-		wrapper.Set("on", runtime.ToValue(func(eventHandlerContext sobek.FunctionCall) sobek.Value {
+		if err != nil { fmt.Println("error while adding send to socket prototype") }
+
+
+		err = wrapper.Set("on", runtime.ToValue(func(eventHandlerContext sobek.FunctionCall) sobek.Value {
 			if len(eventHandlerContext.Arguments) == 0 { panic(runtime.ToValue("on(event, handler): missing event")) }
 
 			eventType := eventHandlerContext.Argument(0).String()
@@ -243,6 +250,9 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 			return sobek.Undefined()
 		}))
+
+		if err != nil { fmt.Println("error while adding on to socket prototype") }
+
 
 		msgHandler := runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
 			msg := msgHandlerContext.Argument(0).String()
