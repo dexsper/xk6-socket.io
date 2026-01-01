@@ -14,6 +14,11 @@ io.on("connection", (socket) => {
     console.log("hello:", data);
     socket.emit("hello_back", { ok: true, got: data });
   });
+
+  setTimeout(() => {
+    socket.disconnect(true);
+    console.log('disc')
+  }, 2000);
 });
 
 console.log("listening on http://localhost:4000");

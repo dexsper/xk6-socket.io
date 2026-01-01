@@ -18,4 +18,8 @@ export default function () {
     socket.emit("hello", { from: "k6", t: Date.now() });
   });
 
+  setTimeout(() => {
+    console.log('ciao')
+  }, 5000);
+
 }

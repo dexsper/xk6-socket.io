@@ -150,13 +150,21 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			
 			// Engine.IO ping -> pong
 			if msg == "2" {
-				_, _ = sendFunction(socketObject, runtime.ToValue("3"))
+				_, err = sendFunction(socketObject, runtime.ToValue("3"))
+				if err != nil { panic(runtime.ToValue(err)) }
+				return sobek.Undefined()
+			}
+
+			if msg == "40" {
+				fmt.Println("received 40, ", connected)
+
+				connected = true
 				return sobek.Undefined()
 			}
 
 			if strings.HasPrefix(msg, "0") {
 				if connected { return sobek.Undefined() }
-				connected = true
+				fmt.Println("going through, ", connected)
 
 				packet := "40"
 
@@ -178,8 +186,12 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 						packet = packet + string(bearer)
 					}
 				}
+				fmt.Println("here %s", packet)
 
-				_, _ = sendFunction(socketObject, runtime.ToValue(packet))
+				if _, err := sendFunction(socketObject, runtime.ToValue(packet)); err != nil {
+					panic(err)
+				}
+
 				return sobek.Undefined()
 			}
 
