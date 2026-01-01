@@ -245,7 +245,6 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				return sobek.Undefined()
 			})); err != nil {
 				panic(err)
-				return sobek.Undefined()
 			}
 
 			return sobek.Undefined()
