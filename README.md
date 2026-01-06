@@ -1,4 +1,4 @@
-# xk6-socket.io
+# xk6 Socket.IO extension
 
 Socket.IO client for k6, implemented as an xk6 extension. Use it to drive Socket.IO WebSocket traffic from k6 scripts, including custom events, connect/disconnect hooks, and basic auth/query configuration.
 
