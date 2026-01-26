@@ -268,10 +268,10 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			if strings.HasPrefix(msg, EngineIOCodes.Message + SocketIOCodes.Connect) {
 				connected = true
 
-				fmt.Println("pendings", pendingEmits)
+				// fmt.Println("pendings", pendingEmits)
 
 				for _, fn := range pendingEmits {
-					fmt.Println("going through pending")
+					//fmt.Println("going through pending")
 					fn()
 				}
 				pendingEmits = nil
@@ -299,7 +299,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 			if strings.HasPrefix(msg, EngineIOCodes.Open) {
 				if connected { return sobek.Undefined() }
-				fmt.Println("going through, ", connected, msg)
+				//fmt.Println("going through, ", connected, msg)
 
 				packet := EngineIOCodes.Message + SocketIOCodes.Connect
 
@@ -321,7 +321,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 						packet = packet + string(bearer)
 					}
 				}
-				fmt.Printf("here %s", packet)
+				//fmt.Printf("here %s", packet)
 
 				if _, err := sendFunction(socketValue, runtime.ToValue(packet)); err != nil {
 					panic(err)
