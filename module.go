@@ -169,11 +169,13 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			}
 		}
 
-		emitFunction := func(event string, data sobek.Value) {
+		emitFunction := func(event string, args []sobek.Value) {
 			send := func() {
 				array := runtime.NewArray()
 				_ = array.Set("0", runtime.ToValue(event))
-				_ = array.Set("1", data)
+				for i, arg := range args {
+					_ = array.Set(strconv.Itoa(i+1), arg)
+				}
 
 				str, _ := jsonStringifyFunction(sobek.Undefined(), array)
 				packet := EngineIOCodes.Message + SocketIOCodes.Event + str.String()
@@ -200,16 +202,16 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		// inject emit method
 		err = wrapper.Set("emit", runtime.ToValue(func(emitContext sobek.FunctionCall) sobek.Value {
 			if len(emitContext.Arguments) == 0 {
-				panic(runtime.ToValue("emit(event, data): missing event"))
+				panic(runtime.ToValue("emit(event, ...args): missing event"))
 			}
 			event := emitContext.Argument(0).String()
 
-			data := sobek.Undefined()
+			var args []sobek.Value
 			if len(emitContext.Arguments) > 1 {
-				data = emitContext.Argument(1)
+				args = emitContext.Arguments[1:]
 			}
 
-			emitFunction(event, data)
+			emitFunction(event, args)
 			return sobek.Undefined()
 		}))
 
@@ -223,7 +225,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				panic(runtime.ToValue("send(data): missing data"))
 			}
 
-			emitFunction("message", sendContext.Argument(0))
+			emitFunction("message", []sobek.Value{sendContext.Argument(0)})
 			return sobek.Undefined()
 		}))
 
@@ -448,8 +450,10 @@ func extractEvent(msg string) (string, any, error) {
 	}
 
 	var data any
-	if len(arr) > 1 {
+	if len(arr) > 2 {
 		data = arr[1:]
+	} else if len(arr) > 1 {
+		data = arr[1]
 	}
 
 	return event, data, nil
