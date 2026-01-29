@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/modules"
@@ -60,6 +61,7 @@ type Options struct {
 	Auth      map[string]any `json:"auth"`
 	Query     map[string]any `json:"query"`
 	Params    map[string]any `json:"params"`
+	Timeout   int            `json:"timeout"`
 }
 
 var EngineIOCodes = struct {
@@ -117,6 +119,9 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 	if options.Params == nil {
 		options.Params = map[string]any{}
 	}
+	if options.Timeout <= 0 {
+		options.Timeout = 10
+	}
 
 	websocketURL, err := buildSocketIOWSURL(host, options)
 	if err != nil {
@@ -146,6 +151,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 	callback := runtime.ToValue(func(callbackContext sobek.FunctionCall) sobek.Value {
 		var connected = false
+		var connectionEstablished = false
 		var pendingEmits []func()
 		var callbackHandlers = map[string][]sobek.Callable{}
 
@@ -260,6 +266,11 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				return sobek.Undefined()
 			}
 
+			if eventType == "error" {
+				callbackHandlers["error"] = append(callbackHandlers["error"], handlerFunction)
+				return sobek.Undefined()
+			}
+
 			if _, err := onCallbackFunction(socketValue, runtime.ToValue("message"), runtime.ToValue(func(msgHandlerContext sobek.FunctionCall) sobek.Value {
 				msg := msgHandlerContext.Argument(0).String()
 
@@ -300,6 +311,7 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 			if strings.HasPrefix(msg, EngineIOCodes.Message+SocketIOCodes.Connect) {
 				connected = true
+				connectionEstablished = true
 
 				// fmt.Println("pendings", pendingEmits)
 
@@ -328,6 +340,19 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 				if err != nil {
 					fmt.Println("error while closing ws")
 				}
+
+				return sobek.Undefined()
+			}
+
+			// Handle Socket.IO error messages
+			if strings.HasPrefix(msg, EngineIOCodes.Message+SocketIOCodes.Error) {
+				trimmed := strings.TrimPrefix(msg, EngineIOCodes.Message+SocketIOCodes.Error)
+
+				errorObj := runtime.NewObject()
+				_ = errorObj.Set("message", runtime.ToValue(trimmed))
+				_ = errorObj.Set("type", runtime.ToValue("socketio"))
+
+				dispatch("error", errorObj)
 
 				return sobek.Undefined()
 			}
@@ -373,6 +398,48 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		if _, err := onCallbackFunction(socketValue, runtime.ToValue("message"), msgHandler); err != nil {
 			panic(err)
 		}
+
+		// Subscribe to WebSocket error event
+		errorHandler := runtime.ToValue(func(errorHandlerContext sobek.FunctionCall) sobek.Value {
+			errorMsg := errorHandlerContext.Argument(0)
+
+			// Dispatch error to Socket.IO error handlers
+			dispatch("error", errorMsg)
+
+			return sobek.Undefined()
+		})
+
+		if _, err := onCallbackFunction(socketValue, runtime.ToValue("error"), errorHandler); err != nil {
+			panic(err)
+		}
+
+		// Connection timeout mechanism
+		go func() {
+			timeoutDuration := time.Duration(options.Timeout) * time.Second
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+
+			timeoutTimer := time.After(timeoutDuration)
+
+			for {
+				select {
+				case <-timeoutTimer:
+					// Timeout reached
+					if !connectionEstablished {
+						errorObj := runtime.NewObject()
+						_ = errorObj.Set("message", runtime.ToValue("Connection timeout: failed to establish connection"))
+						_ = errorObj.Set("type", runtime.ToValue("timeout"))
+						dispatch("error", errorObj)
+					}
+					return
+				case <-ticker.C:
+					// Check if connection established
+					if connectionEstablished {
+						return
+					}
+				}
+			}
+		}()
 
 		// run handler
 		if handlerFunction != nil {
