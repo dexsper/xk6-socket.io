@@ -384,12 +384,29 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		return sobek.Undefined()
 	})
 
-	return m.wsConnect(
+	res, err := m.wsConnect(
 		sobek.Undefined(),
 		runtime.ToValue(websocketURL),
 		runtime.ToValue(options.Params),
 		callback,
 	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resObj := res.ToObject(runtime)
+	status := resObj.Get("status")
+
+	if status != nil && status.ToInteger() >= 400 {
+		return nil, fmt.Errorf(
+			"socket.io connect failed: %d (%s)",
+			status.ToInteger(),
+			websocketURL,
+		)
+	}
+
+	return res, nil
 }
 
 func requireMethod(runtime *sobek.Runtime, obj *sobek.Object, name string) sobek.Callable {
