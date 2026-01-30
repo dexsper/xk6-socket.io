@@ -1,6 +1,7 @@
 package socketio
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -149,9 +150,13 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 	// wsModuleObj := wsModuleValue.ToObject(runtime)
 	// connectFunction := requireMethod(runtime, wsModuleObj, "connect")
 
+	// Get VU context to check if VU is still alive
+	var vuCtx context.Context = m.vu.Context()
+
 	callback := runtime.ToValue(func(callbackContext sobek.FunctionCall) sobek.Value {
 		var connected = false
 		var connectionEstablished = false
+		var closed = false
 		var pendingEmits []func()
 		var callbackHandlers = map[string][]sobek.Callable{}
 
@@ -165,11 +170,33 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 		jsonStringifyFunction := requireMethod(runtime, jsonObject, "stringify")
 
 		dispatch := func(event string, payload any) {
+			// Check if VU context is still alive
+			if vuCtx.Err() != nil {
+				// VU is being terminated, skip dispatch
+				return
+			}
+
+			// Recover from panics when VU is being terminated
+			defer func() {
+				if r := recover(); r != nil {
+					// Only log if VU is still alive (real error)
+					if vuCtx.Err() == nil {
+						fmt.Printf("event dispatch panic for '%s': %v\n", event, r)
+					}
+				}
+			}()
+
 			if list, ok := callbackHandlers[event]; ok {
 				for _, handler := range list {
+					// Check context again before each handler
+					if vuCtx.Err() != nil {
+						return
+					}
+					
 					_, err = handler(sobek.Undefined(), runtime.ToValue(payload))
-					if err != nil {
-						fmt.Println("event dispatch error")
+					if err != nil && vuCtx.Err() == nil {
+						// Only log errors if VU is still alive
+						fmt.Printf("event dispatch error for '%s': %v\n", event, err)
 					}
 				}
 			}
@@ -401,6 +428,11 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 		// Subscribe to WebSocket error event
 		errorHandler := runtime.ToValue(func(errorHandlerContext sobek.FunctionCall) sobek.Value {
+			// Check if VU is still alive
+			if vuCtx.Err() != nil {
+				return sobek.Undefined()
+			}
+
 			errorMsg := errorHandlerContext.Argument(0)
 
 			// Dispatch error to Socket.IO error handlers
@@ -415,6 +447,16 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 		// Subscribe to WebSocket close event
 		closeHandler := runtime.ToValue(func(closeHandlerContext sobek.FunctionCall) sobek.Value {
+			// Check if VU is still alive
+			if vuCtx.Err() != nil {
+				return sobek.Undefined()
+			}
+
+			if closed {
+				return sobek.Undefined()
+			}
+
+			closed = true
 			connected = false
 			connectionEstablished = false
 
@@ -442,9 +484,13 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 
 			for {
 				select {
+				case <-vuCtx.Done():
+					// VU is being terminated, stop timeout check
+					return
 				case <-timeoutTimer:
 					// Timeout reached
-					if !connectionEstablished {
+					if !connectionEstablished && vuCtx.Err() == nil {
+						// VU is still alive, safe to create error object
 						errorObj := runtime.NewObject()
 						_ = errorObj.Set("message", runtime.ToValue("Connection timeout: failed to establish connection"))
 						_ = errorObj.Set("type", runtime.ToValue("timeout"))
