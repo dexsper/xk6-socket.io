@@ -413,6 +413,25 @@ func (m *module) io(host string, optionsVal sobek.Value, handler sobek.Value) (s
 			panic(err)
 		}
 
+		// Subscribe to WebSocket close event
+		closeHandler := runtime.ToValue(func(closeHandlerContext sobek.FunctionCall) sobek.Value {
+			connected = false
+			connectionEstablished = false
+
+			// Dispatch disconnect to Socket.IO disconnect handlers
+			dispatch("disconnect", nil)
+
+			// Clean up handlers and pending emits
+			callbackHandlers = map[string][]sobek.Callable{}
+			pendingEmits = nil
+
+			return sobek.Undefined()
+		})
+
+		if _, err := onCallbackFunction(socketValue, runtime.ToValue("close"), closeHandler); err != nil {
+			panic(err)
+		}
+
 		// Connection timeout mechanism
 		go func() {
 			timeoutDuration := time.Duration(options.Timeout) * time.Second
